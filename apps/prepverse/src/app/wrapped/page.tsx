@@ -1,0 +1,23 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Activity, ArrowRight, BookOpen, CalendarDays, Clock3, Flame, Sparkles, Trophy } from "lucide-react";
+import { AppSidebar } from "@/components/app-sidebar";
+import { ApiError, apiRequest } from "@/lib/api";
+
+type Wrapped={period_days:number;focus_minutes:number;active_days:number;xp_earned:number;activity_count:number;subjects:Array<{name:string;minutes:number}>;empty:boolean};
+const hours=(minutes:number)=>`${Math.floor(minutes/60)}h ${minutes%60}m`;
+export default function WrappedPage(){
+ const router=useRouter();const [data,setData]=useState<Wrapped|null>(null);const [error,setError]=useState("");
+ useEffect(()=>{apiRequest<Wrapped>("/wrapped").then(setData).catch((cause:unknown)=>{if(cause instanceof ApiError&&cause.status===401)router.replace("/login");else setError(cause instanceof Error?cause.message:"Study Wrapped could not be loaded.");});},[router]);
+ return <div className="site-frame app-frame min-h-[calc(100vh-60px)]"><div className="lg:flex"><AppSidebar active="/wrapped"/><main className="min-w-0 flex-1 bg-[#f6f4eb] px-4 py-5 sm:px-7 sm:py-7 lg:px-9">
+   <header className="mb-6"><div className="text-[9px] font-bold uppercase tracking-[.16em] text-[#777823]">YOUR RECENT LEARNING ACTIVITY</div><h1 className="display-type mt-1 text-4xl leading-none sm:text-5xl">Study Wrapped</h1><p className="mt-2 text-[11px] text-[#66655d]">A 30-day look at activity actually recorded in your PrepVerse account.</p></header>
+   {error&&<p role="alert" className="mb-4 rounded-xl border border-[#a24127]/30 bg-[#a24127]/5 p-3 text-[10px] text-[#842d18]">{error}</p>}{!data?<div className="rounded-xl border border-black/20 bg-white/70 p-5 text-[10px] text-[#77766d]">Calculating your saved activity…</div>:data.empty?<section className="rounded-2xl border-2 border-black bg-[#fffef8] p-8 text-center shadow-[3px_3px_0_#10100f]"><Activity className="mx-auto" size={27}/><h2 className="mt-3 text-[14px] font-black">Your first study session starts your Wrapped.</h2><p className="mx-auto mt-2 max-w-md text-[10px] leading-5 text-[#77766d]">Focus sessions and learning activities will build this report over time. No sample or estimated activity is included.</p><Link href="/focus" className="black-button focus-ring mt-4 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-[10px] font-bold">Start a focus session <ArrowRight size={13}/></Link></section>:<>
+     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[{label:"Focused study",value:hours(data.focus_minutes),icon:Clock3},{label:"Active days",value:`${data.active_days} / 30`,icon:CalendarDays},{label:"XP earned",value:`${data.xp_earned} XP`,icon:Trophy},{label:"Study activities",value:data.activity_count,icon:Flame}].map(({label,value,icon:Icon})=><article key={label} className="rounded-2xl border border-black/20 bg-[#fffef8] p-4"><div className="flex items-center justify-between text-[9px] font-semibold text-[#77766d]"><span>{label}</span><span className="flex size-7 items-center justify-center rounded-lg bg-[#efff4f]"><Icon size={14}/></span></div><div className="mt-4 text-2xl font-black">{value}</div></article>)}</section>
+     <section className="mt-4 rounded-2xl border border-black/20 bg-[#fffef8] p-5 sm:p-6"><div className="flex items-center gap-2 text-[12px] font-black"><Sparkles size={15}/>Your study mix</div><p className="mt-1 text-[9px] text-[#77766d]">Focused minutes by subject across the last 30 days.</p>{data.subjects.length===0?<p className="mt-4 text-[10px] text-[#77766d]">No subject-level focus sessions were recorded during this period.</p>:<div className="mt-4 space-y-3">{data.subjects.map(item=><div key={item.name} className="grid grid-cols-[minmax(100px,.5fr)_1.5fr_60px] items-center gap-3"><span className="truncate text-[9px] font-semibold">{item.name}</span><div className="h-2 rounded-full bg-[#e8e6d9]"><div className="h-full rounded-full bg-[#c7d326]" style={{width:`${Math.max(2,item.minutes/Math.max(...data.subjects.map(subject=>subject.minutes))*100)}%`}}/></div><span className="text-right text-[9px] text-[#66655d]">{hours(item.minutes)}</span></div>)}</div>}
+     </section><div className="mt-4 flex items-start gap-2 rounded-xl border border-black/15 bg-white/50 p-4"><BookOpen size={14} className="mt-0.5 shrink-0"/><p className="text-[9px] leading-5 text-[#77766d]">This report counts logged PrepVerse activities and completed focus sessions from your account. It does not infer study time when the app is idle or estimate unrecorded work.</p></div>
+   </>}
+ </main></div></div>;
+}

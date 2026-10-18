@@ -1,0 +1,19 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, GitBranch, Target } from "lucide-react";
+import Link from "next/link";
+import { AppSidebar } from "@/components/app-sidebar";
+import { ApiError, apiRequest } from "@/lib/api";
+
+type Tree={overall:number;tracked_topics:number;empty:boolean;subjects:Array<{id:string;name:string;pinned:boolean;topics:Array<{id:string;name:string;mastery:number;importance:string;source:string}>}>};
+export default function SkillTreePage(){
+  const router=useRouter();const [tree,setTree]=useState<Tree|null>(null);const [error,setError]=useState("");
+  useEffect(()=>{apiRequest<Tree>("/mastery").then(setTree).catch((cause:unknown)=>{if(cause instanceof ApiError&&cause.status===401)router.replace("/login");else setError(cause instanceof Error?cause.message:"Skill Tree could not be loaded.");});},[router]);
+  return <div className="site-frame app-frame min-h-[calc(100vh-60px)]"><div className="lg:flex"><AppSidebar active="/skill-tree"/><main className="min-w-0 flex-1 bg-[#f6f4eb] px-4 py-5 sm:px-7 sm:py-7 lg:px-9">
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><div className="text-[9px] font-bold uppercase tracking-[.16em] text-[#777823]">PROGRESS FROM YOUR PRACTICE</div><h1 className="display-type mt-1 text-4xl leading-none sm:text-5xl">Skill Tree</h1><p className="mt-2 text-[11px] text-[#66655d]">Mastery is updated when you practice topics from your course context.</p></div>{tree&&<div className="rounded-xl border border-black/20 bg-[#fffef8] px-4 py-3 text-right"><div className="text-[9px] text-[#77766d]">Overall mastery</div><div className="mt-1 text-2xl font-black">{tree.overall}%</div></div>}</header>
+    {error&&<p role="alert" className="rounded-xl border border-[#a24127]/30 bg-[#a24127]/5 p-3 text-[10px] text-[#842d18]">{error}</p>}
+    {!tree?<div className="rounded-xl border border-black/20 bg-white/70 p-5 text-[10px] text-[#77766d]">Loading your topic progress…</div>:tree.empty?<section className="rounded-2xl border-2 border-black bg-[#fffef8] p-8 text-center shadow-[3px_3px_0_#10100f]"><GitBranch className="mx-auto" size={28}/><h2 className="mt-3 text-[14px] font-black">Your skill map begins with your syllabus.</h2><p className="mx-auto mt-2 max-w-lg text-[10px] leading-5 text-[#77766d]">Add subjects and topics in StudyPacks or import material, then practice those topics. Progress will be based on your actual answers.</p><Link href="/study-packs" className="black-button focus-ring mt-4 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-[10px] font-bold">Set up course topics <ArrowRight size={13}/></Link></section>:<div className="space-y-4">{tree.subjects.map(subject=><section key={subject.id} className="rounded-2xl border border-black/20 bg-[#fffef8] p-4 sm:p-5"><div className="flex items-center justify-between"><h2 className="text-[12px] font-black">{subject.name}</h2><span className="text-[9px] text-[#77766d]">{subject.topics.length} topics tracked</span></div>{subject.topics.length===0?<p className="mt-3 text-[9px] text-[#77766d]">No topics mapped yet. Add an outline or import notes in StudyPacks.</p>:<div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{subject.topics.map(topic=><article key={topic.id} className="rounded-xl border border-black/15 p-3"><div className="flex items-start justify-between gap-2"><div className="text-[10px] font-bold">{topic.name}</div><Target size={13} className="shrink-0 text-[#72741e]"/></div><div className="mt-2 flex justify-between text-[8px] text-[#77766d]"><span className="capitalize">{topic.importance} · {topic.source}</span><span>{topic.mastery}%</span></div><div className="mt-1.5 h-1.5 rounded-full bg-[#e8e6d9]"><div className="h-full rounded-full bg-[#c7d326]" style={{width:`${topic.mastery}%`}}/></div></article>)}</div>}</section>)}</div>}
+  </main></div></div>;
+}

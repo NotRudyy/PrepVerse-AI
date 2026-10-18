@@ -1,0 +1,17 @@
+{
+  "name": "prepverse-ai",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "dev": "pnpm --filter prepverse dev",
+    "build": "pnpm --filter prepverse build",
+    "start": "pnpm --filter prepverse start",
+    "typecheck": "pnpm --filter prepverse typecheck",
+    "dev:prepverse": "pnpm --filter prepverse dev",
+    "build:prepverse": "pnpm --filter prepverse build"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
