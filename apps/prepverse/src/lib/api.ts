@@ -1,6 +1,11 @@
 const configuredApiUrl = process.env.NEXT_PUBLIC_PREPVERSE_API_URL?.trim().replace(/\/$/, "");
 
-export const apiUrl = configuredApiUrl || (process.env.NODE_ENV === "production" ? "/api/v1" : "http://localhost:8001/api/v1");
+// Production serves the frontend and API on one Vercel origin. Pin this path
+// so a stale or mistyped public environment variable cannot route auth calls
+// to a nonexistent frontend page.
+export const apiUrl = process.env.NODE_ENV === "production"
+  ? "/api/v1"
+  : configuredApiUrl || "http://localhost:8001/api/v1";
 export const apiConfigured = Boolean(apiUrl);
 
 export class ApiError extends Error {
