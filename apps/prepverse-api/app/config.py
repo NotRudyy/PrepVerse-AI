@@ -1,7 +1,7 @@
+import os
 from functools import lru_cache
-from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,10 +21,14 @@ class Settings(BaseSettings):
     github_client_secret: str | None = None
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
-    upload_dir: Path = Path("./var/uploads")
-    max_upload_bytes: int = 20 * 1024 * 1024
+    max_upload_bytes: int = Field(default_factory=lambda: 4 * 1024 * 1024 if os.environ.get("VERCEL") else 20 * 1024 * 1024)
     cookie_name: str = "prepverse_session"
 
+    @model_validator(mode="after")
+    def enforce_serverless_upload_limit(self) -> "Settings":
+        if os.environ.get("VERCEL"):
+            self.max_upload_bytes = min(self.max_upload_bytes, 4 * 1024 * 1024)
+        return self
 
 @lru_cache
 def get_settings() -> Settings:

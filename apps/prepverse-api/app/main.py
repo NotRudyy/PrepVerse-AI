@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, Field
 from pwdlib import PasswordHash
-from sqlalchemy import func, or_, select
+from sqlalchemy import LargeBinary, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,10 +38,16 @@ app.add_middleware(
 
 @app.on_event("startup")
 def initialize_database() -> None:
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
     if engine.dialect.name == "sqlite" and engine.url.database not in (None, ":memory:"):
         Path(engine.url.database).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
+    # Add durable audio/material columns when upgrading an existing database.
+    with engine.begin() as connection:
+        for table, column in (("pv_materials", "file_bytes"), ("pv_voice_notes", "audio_bytes")):
+            existing = {item["name"] for item in inspect(connection).get_columns(table)}
+            if column not in existing:
+                binary_type = LargeBinary().compile(dialect=engine.dialect)
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {binary_type}"))
     # Backfill existing room links into the expiring invite system without
     # changing or deleting existing room memberships and chat history.
     with SessionLocal() as db:
@@ -580,12 +586,7 @@ async def upload_material(file: UploadFile = File(...), subject: str = Form(defa
         raise HTTPException(422, "This document could not be read. Check that it is a valid PDF, PPTX, or DOCX.") from exc
     if not text:
         raise HTTPException(422, "No selectable text could be extracted. Image-only scans need OCR before they can be used by Drift AI.")
-    safe_folder = re.sub(r"[^A-Za-z0-9._-]", "_", user.id)
     file_id = str(uuid4())
-    target_dir = settings.upload_dir / safe_folder
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{file_id}{suffix}"
-    target.write_bytes(raw)
     analysis_warning = None
     if subject.strip().lower() == "auto":
         try:
@@ -616,7 +617,7 @@ async def upload_material(file: UploadFile = File(...), subject: str = Form(defa
                 except HTTPException as exc:
                     analysis_warning = exc.detail
         classification = "selected subject and extracted document content"
-    row = Material(id=file_id, user_id=user.id, subject_id=chosen.id, filename=original_name, storage_path=str(target), extracted_text=text[:1_500_000], status="ready")
+    row = Material(id=file_id, user_id=user.id, subject_id=chosen.id, filename=original_name, storage_path="database", file_bytes=raw, extracted_text=text[:1_500_000], status="ready")
     db.add(row)
     db.add(Activity(user_id=user.id, kind="material", title=f"Added {original_name}", subject=chosen.name))
     db.commit()
@@ -698,13 +699,12 @@ def list_voice_notes(db: Session = Depends(get_db), user: User = Depends(current
 
 @app.get(API + "/voice-notes/{note_id}/audio")
 def get_voice_audio(note_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    from fastapi.responses import FileResponse
     note = db.scalar(select(VoiceNote).where(VoiceNote.id == note_id, VoiceNote.user_id == user.id))
-    if not note or not Path(note.audio_path).is_file():
+    if not note or not note.audio_bytes:
         raise HTTPException(404, "Voice note audio was not found.")
     suffix = Path(note.audio_path).suffix.lower()
     media = {".webm":"audio/webm", ".ogg":"audio/ogg", ".wav":"audio/wav", ".mp3":"audio/mpeg", ".m4a":"audio/mp4", ".aac":"audio/aac", ".flac":"audio/flac"}.get(suffix, "application/octet-stream")
-    return FileResponse(note.audio_path, media_type=media)
+    return Response(content=note.audio_bytes, media_type=media)
 
 
 async def _transcribe_audio(audio: UploadFile) -> tuple[str, bytes]:
@@ -737,12 +737,8 @@ async def create_voice_note(audio: UploadFile = File(...), title: str = Form(def
         raise HTTPException(403, "Turn on AI data use in Settings before sending a recording to Gemini for transcription.")
     transcript, data = await _transcribe_audio(audio)
     note_id = str(uuid4())
-    target_dir = settings.upload_dir / re.sub(r"[^A-Za-z0-9._-]", "_", user.id) / "voice"
-    target_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(audio.filename or "recording.webm").suffix or ".webm"
-    target = target_dir / f"{note_id}{suffix}"
-    target.write_bytes(data)
-    row = VoiceNote(id=note_id, user_id=user.id, title=title.strip()[:180] or "Voice note", transcript=transcript, audio_path=str(target))
+    row = VoiceNote(id=note_id, user_id=user.id, title=title.strip()[:180] or "Voice note", transcript=transcript, audio_path=suffix, audio_bytes=data)
     db.add(row)
     db.add(Activity(user_id=user.id, kind="voice_note", title="Recorded a voice note"))
     db.commit()

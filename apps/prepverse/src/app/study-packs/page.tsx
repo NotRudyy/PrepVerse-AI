@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BookOpen, FilePlus2, FileText, FolderOpen, LoaderCircle, Pin, PinOff, Plus, Sparkles, Upload, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
-import { ApiError, apiRequest } from "@/lib/api";
+import { ApiError, apiRequest, apiUrl } from "@/lib/api";
 
 type Topic = { id: string; title: string; importance: string; mastery: number };
 type Subject = { id: string; name: string; pinned: boolean; topics: Topic[] };
@@ -60,6 +60,7 @@ export default function StudyPacksPage() {
     const supported = files.filter((file) => /\.(pdf|pptx|docx)$/i.test(file.name));
     if (supported.length !== files.length) setMessage("Only PDF, PPTX, and DOCX files can be uploaded. Unsupported files were skipped.");
     if (!supported.length) { setError("Choose at least one PDF, PPTX, or DOCX file."); return; }
+    if (apiUrl.startsWith("/") && supported.some((file) => file.size > 4 * 1024 * 1024)) { setError("On the hosted app, each file must be 4 MB or smaller."); return; }
     setUploading(true); setError("");
     const uploaded: string[] = [];
     const warnings: string[] = [];
@@ -126,7 +127,7 @@ export default function StudyPacksPage() {
 
       <section className="mb-5 grid gap-4 xl:grid-cols-[1.3fr_.8fr]">
         <div className="rounded-2xl border-2 border-black bg-[#fffef8] p-4 shadow-[3px_3px_0_#10100f] sm:p-5">
-          <div className="flex items-start justify-between gap-3"><div><h2 className="text-[13px] font-black">Import course documents</h2><p className="mt-1 text-[10px] leading-5 text-[#737168]">Accepted formats: PDF, PowerPoint (.pptx), and Word (.docx). With AI consent enabled, Drift can sort from document contents and map topics; otherwise folder names and filenames guide sorting.</p></div><span className="flex size-9 items-center justify-center rounded-xl bg-[#efff4f]"><FolderOpen size={17}/></span></div>
+          <div className="flex items-start justify-between gap-3"><div><h2 className="text-[13px] font-black">Import course documents</h2><p className="mt-1 text-[10px] leading-5 text-[#737168]">Accepted formats: PDF, PowerPoint (.pptx), and Word (.docx). Hosted uploads are limited to 4 MB per file. With AI consent enabled, Drift can sort from document contents and map topics; otherwise folder names and filenames guide sorting.</p></div><span className="flex size-9 items-center justify-center rounded-xl bg-[#efff4f]"><FolderOpen size={17}/></span></div>
           <input ref={inputRef} type="file" accept=".pdf,.pptx,.docx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onChange={(event)=>setFiles(Array.from(event.target.files ?? []))} className="sr-only" aria-label="Choose PDF, PPTX, or DOCX documents"/>
           <div onDragOver={(event)=>event.preventDefault()} onDrop={(event)=>{event.preventDefault();setFiles(Array.from(event.dataTransfer.files));}} className="mt-4 rounded-xl border border-dashed border-black/30 bg-[#f7f5ea] p-5 text-center">
             <FilePlus2 className="mx-auto" size={21}/><p className="mt-2 text-[10px] font-semibold">Drop documents here, or <button type="button" className="underline underline-offset-2" onClick={()=>inputRef.current?.click()}>browse your files</button></p><p className="mt-1 text-[9px] text-[#77766d]">Each file is private to your PrepVerse account.</p>

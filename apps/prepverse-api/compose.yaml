@@ -17,11 +17,8 @@ services:
     env_file: .env
     environment:
       PREPVERSE_DATABASE_URL: postgresql+psycopg://prepverse:local-only-change-me@database:5432/prepverse
-      PREPVERSE_UPLOAD_DIR: /srv/prepverse/var/uploads
     ports: ["8001:8001"]
-    volumes: ["prepverse_uploads:/srv/prepverse/var/uploads"]
     depends_on:
       database: { condition: service_healthy }
 volumes:
   prepverse_data:
-  prepverse_uploads:

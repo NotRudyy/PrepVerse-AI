@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -61,6 +61,7 @@ class Material(Base):
     subject_id: Mapped[str] = mapped_column(ForeignKey("pv_subjects.id", ondelete="CASCADE"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     storage_path: Mapped[str] = mapped_column(Text)
+    file_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, default=None)
     extracted_text: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(24), default="ready")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -215,5 +216,6 @@ class VoiceNote(Base):
     title: Mapped[str] = mapped_column(String(180))
     transcript: Mapped[str] = mapped_column(Text)
     audio_path: Mapped[str] = mapped_column(Text)
+    audio_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 

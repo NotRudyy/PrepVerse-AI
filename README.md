@@ -11,11 +11,24 @@ PrepVerse AI is a study workspace for course materials, Drift AI tutoring, pract
 
 The app has no sample accounts or seeded study activity. Create an account and add your course details and study materials.
 
-## Deployment layout
+## Vercel deployment
 
-This repository contains the Next.js web app at `apps/prepverse` and its FastAPI service at `apps/prepverse-api`. They must be deployed as separate services, with the frontend configured to use the public HTTPS API URL.
+The root vercel.json configures the Next.js frontend and FastAPI backend as one Vercel Services project. Requests under /api/ route to FastAPI; all other paths route to Next.js, so browser requests and secure cookies use the same origin. The API entrypoint is apps/prepverse-api/index.py.
 
-The API needs a durable PostgreSQL database, private durable storage for source files and voice recordings, HTTPS cookie settings, and a private JWT secret. Google/GitHub sign-in and Drift AI also require provider credentials. The API currently writes uploaded files to local disk, so it needs a durable storage adapter before it can safely run on a serverless host. Do not publish a production deployment until those services and environment variables are configured.
+Before deploying, set these project environment variables in Vercel:
+
+- NEXT_PUBLIC_PREPVERSE_API_URL=/api/v1: same-origin API path; the production frontend also defaults to this path.
+- PREPVERSE_DATABASE_URL: a persistent PostgreSQL URL. Use a pooled connection for serverless, formatted for psycopg as postgresql+psycopg://...
+- PREPVERSE_JWT_SECRET: a new private random value of at least 32 characters.
+- PREPVERSE_WEB_ORIGIN and PREPVERSE_API_ORIGIN: the production Vercel origin, for example https://prepverse-ai.vercel.app.
+- PREPVERSE_COOKIE_SECURE=true.
+- PREPVERSE_GEMINI_API_KEY for Drift AI, document analysis, and voice transcription.
+- PREPVERSE_GOOGLE_CLIENT_ID and PREPVERSE_GOOGLE_CLIENT_SECRET, plus the matching provider callback URL, to enable Google sign-in.
+- PREPVERSE_GITHUB_CLIENT_ID and PREPVERSE_GITHUB_CLIENT_SECRET, plus the matching provider callback URL, to enable GitHub sign-in.
+
+The Vercel API stores source material and voice audio as PostgreSQL binary data instead of writing to temporary function disk. Vercel Functions have a 4.5 MB request and response payload limit, so the API defaults to a 4 MB upload limit on Vercel; larger uploads need a direct-to-object-storage upload flow.
+
+The site requires a persistent PostgreSQL database to preserve accounts, study activity, uploaded materials, and audio across function restarts. The repository does not contain database or provider secrets. Do not deploy until the PostgreSQL URL and JWT secret are configured; set provider credentials in Vercel only after adding the production callback URLs to each provider.
 
 ## Supported material formats
 
