@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(min_length=32)
     web_origin: str = "http://localhost:3001"
     api_origin: str = "http://localhost:8001"
+    # OAuth callbacks must use the browser-facing host when /api is proxied.
+    oauth_callback_origin: str | None = None
     cookie_secure: bool = False
     google_client_id: str | None = None
     google_client_secret: str | None = None

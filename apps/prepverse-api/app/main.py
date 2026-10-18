@@ -327,7 +327,8 @@ def oauth_start(provider: str):
     if not client_id or not client_secret:
         raise HTTPException(503, f"{provider.title()} sign-in is not configured. Set the provider client ID and secret first.")
     state = secrets.token_urlsafe(32)
-    callback = f"{settings.api_origin}{API}/auth/{provider}/callback"
+    callback_origin = settings.oauth_callback_origin or settings.web_origin
+    callback = f"{callback_origin}{API}/auth/{provider}/callback"
     if provider == "google":
         params = {"client_id": client_id, "redirect_uri": callback, "response_type": "code", "scope": "openid email profile", "state": state, "prompt": "select_account"}
         url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
@@ -350,7 +351,8 @@ async def oauth_callback(provider: str, request: Request, code: str | None = Non
     client_id, client_secret = _oauth_config(provider)
     if not client_id or not client_secret:
         return RedirectResponse(f"{settings.web_origin}/login?error=provider_sign_in_not_configured", status_code=303)
-    callback = f"{settings.api_origin}{API}/auth/{provider}/callback"
+    callback_origin = settings.oauth_callback_origin or settings.web_origin
+    callback = f"{callback_origin}{API}/auth/{provider}/callback"
     async with httpx.AsyncClient(timeout=15) as client:
         if provider == "google":
             token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": client_id, "client_secret": client_secret, "redirect_uri": callback, "grant_type": "authorization_code"})
@@ -938,39 +940,58 @@ def set_exam_date(payload: ExamDateInput, db: Session = Depends(get_db), user: U
 @app.post(API + "/planner/draft")
 async def draft_planner(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     if user.planner_draft:
-        return {**user.planner_draft, "requires_confirmation": True}
-    if not user.ai_data_consent:
-        raise HTTPException(403, "Turn on AI data use in Settings before asking Gemini to draft your planner.")
+        return {**user.planner_draft, "generated_by": user.planner_draft.get("generated_by", "outline"), "requires_confirmation": True}
     subjects = _user_subjects(db, user)
     if not subjects:
         raise HTTPException(409, "Add your semester subjects before asking Drift AI to draft a study planner.")
     materials = list(db.scalars(select(Material).where(Material.user_id == user.id).order_by(Material.created_at.desc()).limit(8)))
     topic_rows = list(db.scalars(select(Topic).join(Subject).where(Subject.user_id == user.id)))
-    evidence = "\n".join(f"{row.name}: " + ", ".join(topic.title for topic in topic_rows if topic.subject_id == row.id) for row in subjects)
+    topics_by_subject = {row.id: [topic for topic in topic_rows if topic.subject_id == row.id] for row in subjects}
+    evidence = "\n".join(f"{row.name}: " + ", ".join(topic.title for topic in topics_by_subject[row.id]) for row in subjects)
     if materials:
         evidence += "\nUploaded sources: " + "; ".join(f"{item.filename} ({db.get(Subject, item.subject_id).name})" for item in materials)
     exam = user.exam_date.isoformat() if user.exam_date else "not provided"
     now = datetime.now(timezone.utc)
     start_day = (now + timedelta(days=1)).date()
-    raw = await _gemini("Make a realistic editable 7-day study planner using only this learner's subjects and topics. Return JSON {blocks:[{title, subject, day_offset, hour_local, duration_minutes}]}. Include 1-3 blocks per study day, leave one lighter day, never invent exams. day_offset is integer 0-6 from " + start_day.isoformat() + "; hour_local is 8-21; each duration is 20-120 minutes. Semester exam date: " + exam + ". Learner timezone is Asia/Kolkata. Source topics:\n" + evidence[:12000], json_output=True)
-    try:
-        values = json.loads(raw)["blocks"]
-        blocks = []
-        for item in values:
-            offset, hour, minutes = int(item["day_offset"]), int(item["hour_local"]), int(item["duration_minutes"])
-            if offset not in range(7) or hour not in range(8, 22) or minutes not in range(20, 121):
-                raise ValueError("planner bounds")
-            subject = str(item["subject"])[:140]
-            linked = next((row for row in subjects if row.name.lower() == subject.lower()), None)
-            local_start = datetime.combine(start_day + timedelta(days=offset), time(hour, 0), tzinfo=timezone(timedelta(hours=5, minutes=30)))
-            blocks.append({"title": str(item["title"])[:180], "subject": linked.name if linked else subject, "subject_id": linked.id if linked else None, "starts_at": local_start.isoformat(), "duration_minutes": minutes})
-        if not blocks:
-            raise ValueError("empty draft")
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        raise HTTPException(502, "Drift AI returned a planner in an invalid format. No study blocks were saved.") from exc
-    user.planner_draft = {"blocks": blocks, "generated_at": now.isoformat()}
+    blocks = []
+    generated_by = "outline"
+    if user.ai_data_consent and settings.gemini_api_key:
+        try:
+            raw = await _gemini("Make a realistic editable 7-day study planner using only this learner's subjects and topics. Return JSON {blocks:[{title, subject, day_offset, hour_local, duration_minutes}]}. Include 1-3 blocks per study day, leave one lighter day, never invent exams. day_offset is integer 0-6 from " + start_day.isoformat() + "; hour_local is 8-21; each duration is 20-120 minutes. Semester exam date: " + exam + ". Learner timezone is Asia/Kolkata. Source topics:\n" + evidence[:12000], json_output=True)
+            values = json.loads(raw)["blocks"]
+            for item in values:
+                offset, hour, minutes = int(item["day_offset"]), int(item["hour_local"]), int(item["duration_minutes"])
+                if offset not in range(7) or hour not in range(8, 22) or minutes not in range(20, 121):
+                    raise ValueError("planner bounds")
+                subject_name = str(item["subject"])[:140]
+                linked = next((row for row in subjects if row.name.lower() == subject_name.lower()), None)
+                local_start = datetime.combine(start_day + timedelta(days=offset), time(hour, 0), tzinfo=timezone(timedelta(hours=5, minutes=30)))
+                blocks.append({"title": str(item["title"])[:180], "subject": linked.name if linked else subject_name, "subject_id": linked.id if linked else None, "starts_at": local_start.isoformat(), "duration_minutes": minutes})
+            if not blocks:
+                raise ValueError("empty draft")
+            generated_by = "drift"
+        except HTTPException as exc:
+            if exc.status_code not in {502, 503}:
+                raise
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            pass
+    if not blocks:
+        # Build an honest, deterministic draft from the learner's real outline
+        # when AI consent is off, no model key is configured, or Gemini is down.
+        local_tz = timezone(timedelta(hours=5, minutes=30))
+        for offset in range(7):
+            subject = subjects[offset % len(subjects)]
+            subject_topics = sorted(topics_by_subject[subject.id], key=lambda topic: (topic.importance != "high", topic.mastery, topic.title))
+            if subject_topics:
+                topic = subject_topics[(offset // len(subjects)) % len(subject_topics)]
+                title = f"Review {topic.title}"
+            else:
+                title = f"Review {subject.name} course notes"
+            local_start = datetime.combine(start_day + timedelta(days=offset), time(18, 0), tzinfo=local_tz)
+            blocks.append({"title": title[:180], "subject": subject.name, "subject_id": subject.id, "starts_at": local_start.isoformat(), "duration_minutes": 45})
+    user.planner_draft = {"blocks": blocks, "generated_at": now.isoformat(), "generated_by": generated_by}
     db.commit()
-    return {"blocks": blocks, "generated_at": now.isoformat(), "requires_confirmation": True}
+    return {"blocks": blocks, "generated_at": now.isoformat(), "generated_by": generated_by, "requires_confirmation": True}
 
 
 @app.post(API + "/planner/draft/accept", status_code=201)
@@ -1254,10 +1275,12 @@ def room_messages(room_id: str, after: str | None = None, db: Session = Depends(
             after_dt = datetime.fromisoformat(after)
         except ValueError as exc:
             raise HTTPException(422, "Invalid message cursor.") from exc
-            # Use an inclusive cursor so messages saved within the same
-            # database timestamp interval are not skipped. The client merges
-            # overlapping results by message ID.
-            query = query.where(RoomMessage.created_at >= after_dt)
+        if after_dt.tzinfo is None:
+            after_dt = after_dt.replace(tzinfo=timezone.utc)
+        # PostgreSQL and SQLite may round timestamps differently. Re-read one
+        # second and let the client deduplicate by message ID.
+        after_dt -= timedelta(seconds=1)
+        query = query.where(RoomMessage.created_at >= after_dt)
     rows = db.execute(query.order_by(RoomMessage.created_at.desc(), RoomMessage.id.desc()).limit(100)).all()
     rows.reverse()
     return {"items": [{"id": item.id, "username": username, "body": item.body, "created_at": item.created_at.isoformat()} for item, username in rows]}
